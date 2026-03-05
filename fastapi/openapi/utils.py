@@ -74,13 +74,6 @@ validation_error_response_definition = {
     },
 }
 
-http_exception_definition = {
-    "title": "HTTPException",
-    "type": "object",
-    "properties": {"detail": {"title": "Detail", "type": "string"}},
-    "required": ["detail"],
-}
-
 status_code_ranges: dict[str, str] = {
     "1XX": "Information",
     "2XX": "Success",
@@ -89,6 +82,7 @@ status_code_ranges: dict[str, str] = {
     "5XX": "Server Error",
     "DEFAULT": "Default Response",
 }
+
 
 def is_project_function(func: Any) -> bool:
     try:
@@ -100,7 +94,9 @@ def is_project_function(func: Any) -> bool:
         return False
 
 
-def extract_http_exceptions(func: Any, visited: set[Any] | None = None) -> list[dict[str, Any]]:
+def extract_http_exceptions(
+    func: Any, visited: set[Any] | None = None
+) -> list[dict[str, Any]]:
     if visited is None:
         visited = set()
 
@@ -138,7 +134,6 @@ def extract_http_exceptions(func: Any, visited: set[Any] | None = None) -> list[
                 if exc_name == "HTTPException":
                     is_http_exc = True
                 elif exc_name is not None:
-                    # Check if it's a custom exception inheriting from HTTPException
                     try:
                         exc_cls = getattr(module, exc_name) if module else None
                         is_http_exc = exc_cls and issubclass(exc_cls, HTTPException)
@@ -152,10 +147,10 @@ def extract_http_exceptions(func: Any, visited: set[Any] | None = None) -> list[
                     for kw in node.exc.keywords:
                         if kw.arg:
                             try:
-                                # ast.unparse is available in Python 3.9+
                                 val = ast.unparse(kw.value)
-                                # Basic cleanup for literals
-                                if val.startswith(('"', "'")) and val.endswith(('"', "'")):
+                                if val.startswith(('"', "'")) and val.endswith(
+                                    ('"', "'")
+                                ):
                                     val = val[1:-1]
                                 kwargs[kw.arg] = val
                             except Exception:
@@ -372,6 +367,7 @@ def get_openapi_path(
         tuple[ModelField, Literal["validation", "serialization"]], dict[str, Any]
     ],
     separate_input_output_schemas: bool = True,
+    discover_exceptions: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     path = {}
     security_schemes: dict[str, Any] = {}
@@ -559,24 +555,32 @@ def get_openapi_path(
                     openapi_response["description"] = description
 
             # Automatically add exceptions discovered in the code
-            discovered_exceptions = extract_http_exceptions(route.endpoint)
-            for exc in discovered_exceptions:
-                status_code_val = exc["kwargs"].get("status_code")
-                if status_code_val:
-                    # Try to convert to string status code, handling potential literal vs variable
-                    # In AST unparse, literals like 400 stay 400.
-                    status_key = str(status_code_val)
-                    if status_key not in operation["responses"]:
-                        operation["responses"][status_key] = {
-                            "description": exc["kwargs"].get("detail", "Error"),
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": REF_PREFIX + "HTTPException"}
-                                }
-                            },
-                        }
-                        if "HTTPException" not in definitions:
-                            definitions["HTTPException"] = http_exception_definition
+            if discover_exceptions:
+                discovered_exceptions = extract_http_exceptions(route.endpoint)
+                for exc in discovered_exceptions:
+                    status_code_val = exc["kwargs"].get("status_code")
+                    if status_code_val:
+                        # Try to convert to string status code, handling potential literal vs variable
+                        # In AST unparse, literals like 400 stay 400.
+                        status_key = str(status_code_val)
+                        if status_key not in operation["responses"]:
+                            detail = exc["kwargs"].get("detail", "Error")
+                            operation["responses"][status_key] = {
+                                "description": detail,
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "detail": {
+                                                    "type": "string",
+                                                    "example": detail,
+                                                }
+                                            },
+                                        }
+                                    }
+                                },
+                            }
 
             http422 = "422"
             all_route_params = get_flat_params(route.dependant)
@@ -654,6 +658,7 @@ def get_openapi(
     license_info: dict[str, str | Any] | None = None,
     separate_input_output_schemas: bool = True,
     external_docs: dict[str, Any] | None = None,
+    discover_exceptions: bool = False,
 ) -> dict[str, Any]:
     info: dict[str, Any] = {"title": title, "version": version}
     if summary:
@@ -689,6 +694,7 @@ def get_openapi(
                 model_name_map=model_name_map,
                 field_mapping=field_mapping,
                 separate_input_output_schemas=separate_input_output_schemas,
+                discover_exceptions=discover_exceptions,
             )
             if result:
                 path, security_schemes, path_definitions = result
@@ -708,6 +714,7 @@ def get_openapi(
                 model_name_map=model_name_map,
                 field_mapping=field_mapping,
                 separate_input_output_schemas=separate_input_output_schemas,
+                discover_exceptions=discover_exceptions,
             )
             if result:
                 path, security_schemes, path_definitions = result

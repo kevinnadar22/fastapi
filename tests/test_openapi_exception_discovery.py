@@ -7,15 +7,18 @@ def check_item_module(item_id: str):
     if item_id == "foo":
         raise HTTPException(status_code=404, detail="Item not found nested")
 
+
 def deep_check_module(item_id: str):
     if item_id == "foo":
         raise HTTPException(status_code=401, detail="Unauthorized deep")
 
+
 def intermediate_check_module(item_id: str):
     deep_check_module(item_id)
 
+
 def test_openapi_exception_discovery_simple():
-    app = FastAPI()
+    app = FastAPI(discover_exceptions=True)
 
     @app.get("/items/{item_id}")
     def read_item(item_id: str):
@@ -27,11 +30,11 @@ def test_openapi_exception_discovery_simple():
     responses = openapi_schema["paths"]["/items/{item_id}"]["get"]["responses"]
     assert "404" in responses
     assert responses["404"]["description"] == "Item not found"
-    assert responses["404"]["content"]["application/json"]["schema"]["$ref"] == "#/components/schemas/HTTPException"
-    assert "HTTPException" in openapi_schema["components"]["schemas"]
+    assert "detail" in responses["404"]["content"]["application/json"]["schema"]["properties"]
+    assert "HTTPException" not in openapi_schema.get("components", {}).get("schemas", {})
 
 def test_openapi_exception_discovery_multiple():
-    app = FastAPI()
+    app = FastAPI(discover_exceptions=True)
 
     @app.get("/items/{item_id}")
     def read_item(item_id: str):
@@ -46,8 +49,9 @@ def test_openapi_exception_discovery_multiple():
     assert "404" in responses
     assert "403" in responses
 
+
 def test_openapi_exception_discovery_nested():
-    app = FastAPI()
+    app = FastAPI(discover_exceptions=True)
 
     @app.get("/items/{item_id}")
     def read_item(item_id: str):
@@ -59,8 +63,9 @@ def test_openapi_exception_discovery_nested():
     assert "404" in responses
     assert responses["404"]["description"] == "Item not found nested"
 
+
 def test_openapi_exception_discovery_deep_nested():
-    app = FastAPI()
+    app = FastAPI(discover_exceptions=True)
 
     @app.get("/items/{item_id}")
     def read_item(item_id: str):
@@ -72,8 +77,9 @@ def test_openapi_exception_discovery_deep_nested():
     assert "401" in responses
     assert responses["401"]["description"] == "Unauthorized deep"
 
+
 def test_openapi_exception_discovery_no_duplicates():
-    app = FastAPI()
+    app = FastAPI(discover_exceptions=True)
 
     @app.get("/items/{item_id}", responses={404: {"description": "Already documented"}})
     def read_item(item_id: str):
@@ -86,13 +92,16 @@ def test_openapi_exception_discovery_no_duplicates():
     assert "404" in responses
     assert responses["404"]["description"] == "Already documented"
 
+
 def test_openapi_exception_discovery_attribute_name():
-    app = FastAPI()
+    app = FastAPI(discover_exceptions=True)
 
     @app.get("/items/{item_id}")
     def read_item(item_id: str):
         if item_id == "foo":
-            raise fastapi.HTTPException(status_code=400, detail="Bad request via attribute")
+            raise fastapi.HTTPException(
+                status_code=400, detail="Bad request via attribute"
+            )
         return {"item_id": item_id}
 
     openapi_schema = app.openapi()
@@ -100,8 +109,9 @@ def test_openapi_exception_discovery_attribute_name():
     assert "400" in responses
     assert responses["400"]["description"] == "Bad request via attribute"
 
+
 def test_openapi_exception_discovery_unsupported_dynamic_status():
-    app = FastAPI()
+    app = FastAPI(discover_exceptions=True)
 
     @app.get("/items/{item_id}")
     def read_item(item_id: str):
@@ -116,11 +126,13 @@ def test_openapi_exception_discovery_unsupported_dynamic_status():
     assert "status" in responses
     assert responses["status"]["description"] == "Dynamic status"
 
+
 class CustomHTTPException(HTTPException):
     pass
 
+
 def test_openapi_exception_discovery_custom_inheritance():
-    app = FastAPI()
+    app = FastAPI(discover_exceptions=True)
 
     @app.get("/items/{item_id}")
     def read_item(item_id: str):

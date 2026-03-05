@@ -1,10 +1,6 @@
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from enum import Enum
-from typing import (
-    Annotated,
-    Any,
-    TypeVar,
-)
+from typing import Annotated, Any, TypeVar
 
 from annotated_doc import Doc
 from fastapi import routing
@@ -840,6 +836,18 @@ class FastAPI(Starlette):
                 """
             ),
         ] = None,
+        discover_exceptions: Annotated[
+            bool,
+            Doc(
+                """
+                Whether to automatically discover `HTTPException`s raised in the code
+                and add them to the OpenAPI schema.
+
+                Defaults to `False` to maintain compatibility with existing OpenAPI
+                snapshots.
+                """
+            ),
+        ] = False,
         strict_content_type: Annotated[
             bool,
             Doc(
@@ -1016,6 +1024,7 @@ class FastAPI(Starlette):
             [] if middleware is None else list(middleware)
         )
         self.middleware_stack: ASGIApp | None = None
+        self.discover_exceptions = discover_exceptions
         self.setup()
 
     def build_middleware_stack(self) -> ASGIApp:
@@ -1096,6 +1105,7 @@ class FastAPI(Starlette):
                 servers=self.servers,
                 separate_input_output_schemas=self.separate_input_output_schemas,
                 external_docs=self.openapi_external_docs,
+                discover_exceptions=self.discover_exceptions,
             )
         return self.openapi_schema
 
