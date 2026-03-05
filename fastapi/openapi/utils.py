@@ -41,6 +41,7 @@ from fastapi.utils import (
     is_body_allowed_for_status_code,
 )
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 from starlette.routing import BaseRoute
 
@@ -135,6 +136,18 @@ def extract_http_exceptions(func: Any, visited: set[Any] | None = None) -> list[
                     exc_name = func_node.attr
 
                 if exc_name == "HTTPException":
+                    is_http_exc = True
+                elif exc_name is not None:
+                    # Check if it's a custom exception inheriting from HTTPException
+                    try:
+                        exc_cls = getattr(module, exc_name) if module else None
+                        is_http_exc = exc_cls and issubclass(exc_cls, HTTPException)
+                    except Exception:
+                        is_http_exc = False
+                else:
+                    is_http_exc = False
+
+                if is_http_exc:
                     kwargs: dict[str, Any] = {}
                     for kw in node.exc.keywords:
                         if kw.arg:

@@ -115,3 +115,20 @@ def test_openapi_exception_discovery_unsupported_dynamic_status():
     # The current implementation uses ast.unparse, so status_code will be the string "status"
     assert "status" in responses
     assert responses["status"]["description"] == "Dynamic status"
+
+class CustomHTTPException(HTTPException):
+    pass
+
+def test_openapi_exception_discovery_custom_inheritance():
+    app = FastAPI()
+
+    @app.get("/items/{item_id}")
+    def read_item(item_id: str):
+        if item_id == "foo":
+            raise CustomHTTPException(status_code=418, detail="I am a teapot")
+        return {"item_id": item_id}
+
+    openapi_schema = app.openapi()
+    responses = openapi_schema["paths"]["/items/{item_id}"]["get"]["responses"]
+    assert "418" in responses
+    assert responses["418"]["description"] == "I am a teapot"
