@@ -1,8 +1,12 @@
+import ast
 import copy
 import http.client
 import inspect
+import sys
+import textwrap
 import warnings
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, Literal, cast
 
 from fastapi import routing
@@ -77,6 +81,88 @@ status_code_ranges: dict[str, str] = {
     "5XX": "Server Error",
     "DEFAULT": "Default Response",
 }
+
+PROJECT_ROOT = Path.cwd().resolve()
+
+
+def is_project_function(func: Any) -> bool:
+    try:
+        file = inspect.getsourcefile(func)
+        if not file:
+            return False
+        return Path(file).resolve().is_relative_to(PROJECT_ROOT)
+    except Exception:
+        return False
+
+
+def extract_http_exceptions(func: Any, visited: set[Any] | None = None) -> list[dict[str, Any]]:
+    if visited is None:
+        visited = set()
+
+    if func in visited:
+        return []
+
+    visited.add(func)
+
+    try:
+        source = inspect.getsource(func)
+        source = textwrap.dedent(source)
+    except (TypeError, OSError):
+        return []
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+
+    results: list[dict[str, Any]] = []
+
+    module = sys.modules.get(func.__module__)
+
+    class Visitor(ast.NodeVisitor):
+        def visit_Raise(self, node: ast.Raise) -> None:
+            if isinstance(node.exc, ast.Call):
+                func_node = node.exc.func
+
+                exc_name = None
+                if isinstance(func_node, ast.Name):
+                    exc_name = func_node.id
+                elif isinstance(func_node, ast.Attribute):
+                    exc_name = func_node.attr
+
+                if exc_name == "HTTPException":
+                    kwargs: dict[str, Any] = {}
+                    for kw in node.exc.keywords:
+                        if kw.arg:
+                            try:
+                                # ast.unparse is available in Python 3.9+
+                                val = ast.unparse(kw.value)
+                                # Basic cleanup for literals
+                                if val.startswith(('"', "'")) and val.endswith(('"', "'")):
+                                    val = val[1:-1]
+                                kwargs[kw.arg] = val
+                            except Exception:
+                                kwargs[kw.arg] = None
+
+                    results.append({"exception": exc_name, "kwargs": kwargs})
+
+            self.generic_visit(node)
+
+        def visit_Call(self, node: ast.Call) -> None:
+            if isinstance(node.func, ast.Name):
+                name = node.func.id
+
+                if module and hasattr(module, name):
+                    called = getattr(module, name)
+
+                    if callable(called) and is_project_function(called):
+                        results.extend(extract_http_exceptions(called, visited))
+
+            self.generic_visit(node)
+
+    Visitor().visit(tree)
+
+    return results
 
 
 def get_openapi_security_definitions(
@@ -454,6 +540,31 @@ def get_openapi_path(
                     )
                     deep_dict_update(openapi_response, process_response)
                     openapi_response["description"] = description
+
+            # Automatically add exceptions discovered in the code
+            discovered_exceptions = extract_http_exceptions(route.endpoint)
+            for exc in discovered_exceptions:
+                status_code_val = exc["kwargs"].get("status_code")
+                if status_code_val:
+                    # Try to convert to string status code, handling potential literal vs variable
+                    # In AST unparse, literals like 400 stay 400.
+                    status_key = str(status_code_val)
+                    if status_key not in operation["responses"]:
+                        detail = exc["kwargs"].get("detail", "Error")
+                        operation["responses"][status_key] = {
+                            "description": detail,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "detail": {"type": "string", "example": detail}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
             http422 = "422"
             all_route_params = get_flat_params(route.dependant)
             if (all_route_params or route.body_field) and not any(
