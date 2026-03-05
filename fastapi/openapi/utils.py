@@ -73,6 +73,13 @@ validation_error_response_definition = {
     },
 }
 
+http_exception_definition = {
+    "title": "HTTPException",
+    "type": "object",
+    "properties": {"detail": {"title": "Detail", "type": "string"}},
+    "required": ["detail"],
+}
+
 status_code_ranges: dict[str, str] = {
     "1XX": "Information",
     "2XX": "Success",
@@ -82,15 +89,12 @@ status_code_ranges: dict[str, str] = {
     "DEFAULT": "Default Response",
 }
 
-PROJECT_ROOT = Path.cwd().resolve()
-
-
 def is_project_function(func: Any) -> bool:
     try:
         file = inspect.getsourcefile(func)
         if not file:
             return False
-        return Path(file).resolve().is_relative_to(PROJECT_ROOT)
+        return Path(file).resolve().is_relative_to(Path.cwd().resolve())
     except Exception:
         return False
 
@@ -550,20 +554,16 @@ def get_openapi_path(
                     # In AST unparse, literals like 400 stay 400.
                     status_key = str(status_code_val)
                     if status_key not in operation["responses"]:
-                        detail = exc["kwargs"].get("detail", "Error")
                         operation["responses"][status_key] = {
-                            "description": detail,
+                            "description": exc["kwargs"].get("detail", "Error"),
                             "content": {
                                 "application/json": {
-                                    "schema": {
-                                        "type": "object",
-                                        "properties": {
-                                            "detail": {"type": "string", "example": detail}
-                                        }
-                                    }
+                                    "schema": {"$ref": REF_PREFIX + "HTTPException"}
                                 }
-                            }
+                            },
                         }
+                        if "HTTPException" not in definitions:
+                            definitions["HTTPException"] = http_exception_definition
 
             http422 = "422"
             all_route_params = get_flat_params(route.dependant)

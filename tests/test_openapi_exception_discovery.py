@@ -27,6 +27,8 @@ def test_openapi_exception_discovery_simple():
     responses = openapi_schema["paths"]["/items/{item_id}"]["get"]["responses"]
     assert "404" in responses
     assert responses["404"]["description"] == "Item not found"
+    assert responses["404"]["content"]["application/json"]["schema"]["$ref"] == "#/components/schemas/HTTPException"
+    assert "HTTPException" in openapi_schema["components"]["schemas"]
 
 def test_openapi_exception_discovery_multiple():
     app = FastAPI()
